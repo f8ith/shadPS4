@@ -70,6 +70,7 @@ struct OrbisSaveDataMountInfo;
 struct OrbisSaveDataMountPoint;
 struct OrbisSaveDataMountResult;
 struct OrbisSaveDataRestoreBackupData;
+struct OrbisSaveDataTransferringMount;
 
 int PS4_SYSV_ABI sceSaveDataAbort();
 Error PS4_SYSV_ABI sceSaveDataBackup(const OrbisSaveDataBackup* backup);
@@ -165,8 +166,8 @@ int PS4_SYSV_ABI sceSaveDataSetSaveDataLibraryUser();
 Error PS4_SYSV_ABI sceSaveDataSetSaveDataMemory(OrbisUserServiceUserId userId, void* buf,
                                                 size_t bufSize, int64_t offset);
 Error PS4_SYSV_ABI sceSaveDataSetSaveDataMemory2(const OrbisSaveDataMemorySet2* setParam);
-int PS4_SYSV_ABI sceSaveDataSetupSaveDataMemory(/*u32 userId, size_t memorySize,
-                                                  OrbisSaveDataParam* param*/);
+Error PS4_SYSV_ABI sceSaveDataSetupSaveDataMemory(OrbisUserServiceUserId userId, size_t memorySize,
+                                                  OrbisSaveDataParam* param);
 Error PS4_SYSV_ABI sceSaveDataSetupSaveDataMemory2(const OrbisSaveDataMemorySetup2* setupParam,
                                                    OrbisSaveDataMemorySetupResult* result);
 int PS4_SYSV_ABI sceSaveDataShutdownStart();
@@ -174,7 +175,8 @@ int PS4_SYSV_ABI sceSaveDataSupportedFakeBrokenStatus();
 int PS4_SYSV_ABI sceSaveDataSyncCloudList();
 Error PS4_SYSV_ABI sceSaveDataSyncSaveDataMemory(OrbisSaveDataMemorySync* syncParam);
 Error PS4_SYSV_ABI sceSaveDataTerminate();
-int PS4_SYSV_ABI sceSaveDataTransferringMount();
+Error PS4_SYSV_ABI sceSaveDataTransferringMount(const OrbisSaveDataTransferringMount* mount,
+                                                OrbisSaveDataMountResult* mountResult);
 Error PS4_SYSV_ABI sceSaveDataUmount(const OrbisSaveDataMountPoint* mountPoint);
 int PS4_SYSV_ABI sceSaveDataUmountSys();
 Error PS4_SYSV_ABI sceSaveDataUmountWithBackup(const OrbisSaveDataMountPoint* mountPoint);

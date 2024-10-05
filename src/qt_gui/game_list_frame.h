@@ -5,6 +5,7 @@
 
 #include <QScrollBar>
 
+#include "background_music_player.h"
 #include "game_info.h"
 #include "game_list_utils.h"
 #include "gui_context_menus.h"
@@ -21,6 +22,9 @@ public Q_SLOTS:
     void RefreshListBackgroundImage();
     void SortNameAscending(int columnIndex);
     void SortNameDescending(int columnIndex);
+    void PlayBackgroundMusic(QTableWidgetItem* item);
+    void onCurrentCellChanged(int currentRow, int currentColumn, int previousRow,
+                              int previousColumn);
 
 private:
     void SetTableItem(int row, int column, QString itemStr);
@@ -41,24 +45,44 @@ public:
     int icon_size;
 
     static bool CompareStringsAscending(GameInfo a, GameInfo b, int columnIndex) {
-        if (columnIndex == 1) {
+        switch (columnIndex) {
+        case 1:
             return a.name < b.name;
-        } else if (columnIndex == 2) {
+        case 2:
             return a.serial < b.serial;
-        } else if (columnIndex == 3) {
+        case 3:
+            return a.region < b.region;
+        case 4:
             return a.fw < b.fw;
+        case 5:
+            return a.size < b.size;
+        case 6:
+            return a.version < b.version;
+        case 7:
+            return a.path < b.path;
+        default:
+            return false;
         }
-        return false;
     }
 
     static bool CompareStringsDescending(GameInfo a, GameInfo b, int columnIndex) {
-        if (columnIndex == 1) {
+        switch (columnIndex) {
+        case 1:
             return a.name > b.name;
-        } else if (columnIndex == 2) {
+        case 2:
             return a.serial > b.serial;
-        } else if (columnIndex == 3) {
+        case 3:
+            return a.region > b.region;
+        case 4:
             return a.fw > b.fw;
+        case 5:
+            return a.size > b.size;
+        case 6:
+            return a.version > b.version;
+        case 7:
+            return a.path > b.path;
+        default:
+            return false;
         }
-        return false;
     }
 };
