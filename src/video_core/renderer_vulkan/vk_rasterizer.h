@@ -32,7 +32,8 @@ public:
     }
 
     void Draw(bool is_indexed, u32 index_offset = 0);
-    void DrawIndirect(bool is_indexed, VAddr address, u32 offset, u32 size);
+    void DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 size, u32 max_count,
+                      VAddr count_address);
 
     void DispatchDirect();
     void DispatchIndirect(VAddr address, u32 offset, u32 size);
@@ -40,8 +41,9 @@ public:
     void ScopeMarkerBegin(const std::string_view& str);
     void ScopeMarkerEnd();
     void ScopedMarkerInsert(const std::string_view& str);
+    void ScopedMarkerInsertColor(const std::string_view& str, const u32 color);
 
-    void InlineDataToGds(u32 gds_offset, u32 value);
+    void InlineData(VAddr address, const void* value, u32 num_bytes, bool is_gds);
     u32 ReadDataFromGds(u32 gsd_offset);
     void InvalidateMemory(VAddr addr, u64 size);
     void MapMemory(VAddr addr, u64 size);
@@ -53,10 +55,13 @@ public:
 
 private:
     void BeginRendering(const GraphicsPipeline& pipeline);
+    void Resolve();
 
     void UpdateDynamicState(const GraphicsPipeline& pipeline);
     void UpdateViewportScissorState();
     void UpdateDepthStencilState();
+
+    bool FilterDraw();
 
 private:
     const Instance& instance;

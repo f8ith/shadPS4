@@ -168,9 +168,12 @@ public:
     Id output_f32{};
     Id output_s32{};
 
+    Id gl_in{};
+
     boost::container::small_vector<Id, 16> interfaces;
 
     Id output_position{};
+    Id primitive_id{};
     Id vertex_index{};
     Id instance_id{};
     Id push_data_block{};
@@ -225,6 +228,7 @@ public:
     Bindings& binding;
     boost::container::small_vector<BufferDefinition, 16> buffers;
     boost::container::small_vector<TextureBufferDefinition, 8> texture_buffers;
+    BufferDefinition srt_flatbuf;
     boost::container::small_vector<TextureDefinition, 8> images;
     boost::container::small_vector<Id, 4> samplers;
 

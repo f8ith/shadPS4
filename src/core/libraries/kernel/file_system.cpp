@@ -9,11 +9,11 @@
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/file_system.h"
 #include "core/libraries/libs.h"
-#include "libkernel.h"
+#include "kernel.h"
 
 namespace Libraries::Kernel {
 
-std::vector<Core::FileSys::DirEntry> GetDirectoryEntries(const std::filesystem::path& path) {
+auto GetDirectoryEntries(const std::filesystem::path& path) {
     std::vector<Core::FileSys::DirEntry> files;
     for (const auto& entry : std::filesystem::directory_iterator(path)) {
         auto& dir_entry = files.emplace_back();
@@ -237,7 +237,7 @@ s64 PS4_SYSV_ABI sceKernelLseek(int d, s64 offset, int whence) {
 }
 
 s64 PS4_SYSV_ABI posix_lseek(int d, s64 offset, int whence) {
-    int result = sceKernelLseek(d, offset, whence);
+    s64 result = sceKernelLseek(d, offset, whence);
     if (result < 0) {
         LOG_ERROR(Kernel_Pthread, "posix_lseek: error = {}", result);
         ErrSceToPosix(result);
@@ -321,26 +321,26 @@ int PS4_SYSV_ABI sceKernelRmdir(const char* path) {
     const std::filesystem::path dir_name = mnt->GetHostPath(path, &ro);
 
     if (dir_name.empty()) {
-        LOG_INFO(Kernel_Fs, "Failed to remove directory: {}, permission denied",
-                 fmt::UTF(dir_name.u8string()));
+        LOG_ERROR(Kernel_Fs, "Failed to remove directory: {}, permission denied",
+                  fmt::UTF(dir_name.u8string()));
         return SCE_KERNEL_ERROR_EACCES;
     }
 
     if (ro) {
-        LOG_INFO(Kernel_Fs, "Failed to remove directory: {}, directory is read only",
-                 fmt::UTF(dir_name.u8string()));
+        LOG_ERROR(Kernel_Fs, "Failed to remove directory: {}, directory is read only",
+                  fmt::UTF(dir_name.u8string()));
         return SCE_KERNEL_ERROR_EROFS;
     }
 
     if (!std::filesystem::is_directory(dir_name)) {
-        LOG_INFO(Kernel_Fs, "Failed to remove directory: {}, path is not a directory",
-                 fmt::UTF(dir_name.u8string()));
+        LOG_ERROR(Kernel_Fs, "Failed to remove directory: {}, path is not a directory",
+                  fmt::UTF(dir_name.u8string()));
         return ORBIS_KERNEL_ERROR_ENOTDIR;
     }
 
     if (!std::filesystem::exists(dir_name)) {
-        LOG_INFO(Kernel_Fs, "Failed to remove directory: {}, no such file or directory",
-                 fmt::UTF(dir_name.u8string()));
+        LOG_ERROR(Kernel_Fs, "Failed to remove directory: {}, no such file or directory",
+                  fmt::UTF(dir_name.u8string()));
         return ORBIS_KERNEL_ERROR_ENOENT;
     }
 
@@ -348,7 +348,7 @@ int PS4_SYSV_ABI sceKernelRmdir(const char* path) {
     int result = std::filesystem::remove_all(dir_name, ec);
 
     if (!ec) {
-        LOG_DEBUG(Kernel_Fs, "Removed directory: {}", fmt::UTF(dir_name.u8string()));
+        LOG_INFO(Kernel_Fs, "Removed directory: {}", fmt::UTF(dir_name.u8string()));
         return ORBIS_OK;
     }
     LOG_ERROR(Kernel_Fs, "Failed to remove directory: {}, error_code={}",
@@ -490,6 +490,16 @@ s32 PS4_SYSV_ABI sceKernelFsync(int fd) {
     return ORBIS_OK;
 }
 
+s32 PS4_SYSV_ABI posix_fsync(int fd) {
+    s32 result = sceKernelFsync(fd);
+    if (result < 0) {
+        LOG_ERROR(Kernel_Pthread, "posix_fstat: error = {}", result);
+        ErrSceToPosix(result);
+        return -1;
+    }
+    return result;
+}
+
 int PS4_SYSV_ABI sceKernelFtruncate(int fd, s64 length) {
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(fd);
@@ -608,7 +618,7 @@ s32 PS4_SYSV_ABI sceKernelRename(const char* from, const char* to) {
     return ORBIS_OK;
 }
 
-void fileSystemSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
+void RegisterFileSystem(Core::Loader::SymbolsResolver* sym) {
     std::srand(std::time(nullptr));
     LIB_FUNCTION("1G3lF1Gg1k8", "libkernel", 1, "libkernel", 1, 1, sceKernelOpen);
     LIB_FUNCTION("wuCroIGjt2g", "libScePosix", 1, "libkernel", 1, 1, posix_open);
@@ -642,6 +652,8 @@ void fileSystemSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("+r3rMFwItV4", "libkernel", 1, "libkernel", 1, 1, sceKernelPread);
     LIB_FUNCTION("uWyW3v98sU4", "libkernel", 1, "libkernel", 1, 1, sceKernelCheckReachability);
     LIB_FUNCTION("fTx66l5iWIA", "libkernel", 1, "libkernel", 1, 1, sceKernelFsync);
+    LIB_FUNCTION("juWbTNM+8hw", "libkernel", 1, "libkernel", 1, 1, posix_fsync);
+    LIB_FUNCTION("juWbTNM+8hw", "libScePosix", 1, "libkernel", 1, 1, posix_fsync);
     LIB_FUNCTION("j2AIqSqJP0w", "libkernel", 1, "libkernel", 1, 1, sceKernelGetdents);
     LIB_FUNCTION("taRWhTJFTgE", "libkernel", 1, "libkernel", 1, 1, sceKernelGetdirentries);
     LIB_FUNCTION("nKWi-N2HBV4", "libkernel", 1, "libkernel", 1, 1, sceKernelPwrite);

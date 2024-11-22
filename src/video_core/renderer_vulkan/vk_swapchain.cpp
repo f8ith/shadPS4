@@ -47,7 +47,7 @@ void Swapchain::Create(u32 width_, u32 height_, vk::SurfaceKHR surface_) {
             std::find_if(modes.begin(), modes.end(),
                          [&requested](vk::PresentModeKHR mode) { return mode == requested; });
 
-        return it != modes.end();
+        return it != modes.cend();
     };
     const bool has_mailbox = find_mode(vk::PresentModeKHR::eMailbox);
 
@@ -197,6 +197,11 @@ void Swapchain::SetSurfaceProperties() {
 
 void Swapchain::Destroy() {
     vk::Device device = instance.GetDevice();
+    const auto wait_result = device.waitIdle();
+    if (wait_result != vk::Result::eSuccess) {
+        LOG_WARNING(Render_Vulkan, "Failed to wait for device to become idle: {}",
+                    vk::to_string(wait_result));
+    }
     if (swapchain) {
         device.destroySwapchainKHR(swapchain);
     }

@@ -160,22 +160,23 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
 
     // Check and log format support details.
     for (const auto& format : LiverpoolToVK::SurfaceFormats()) {
-        if (!IsFormatSupported(GetSupportedFormat(format.vk_format, format.flags), format.flags)) {
+        if (!IsFormatSupported(format.vk_format, format.flags)) {
             LOG_WARNING(Render_Vulkan,
                         "Surface format data_format={}, number_format={} is not fully supported "
-                        "(vk_format={}, requested flags={})",
+                        "(vk_format={}, missing features={})",
                         static_cast<u32>(format.data_format),
                         static_cast<u32>(format.number_format), vk::to_string(format.vk_format),
-                        vk::to_string(format.flags));
+                        vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format)));
         }
     }
     for (const auto& format : LiverpoolToVK::DepthFormats()) {
-        if (!IsFormatSupported(GetSupportedFormat(format.vk_format, format.flags), format.flags)) {
+        if (!IsFormatSupported(format.vk_format, format.flags)) {
             LOG_WARNING(Render_Vulkan,
                         "Depth format z_format={}, stencil_format={} is not fully supported "
-                        "(vk_format={}, requested flags={})",
+                        "(vk_format={}, missing features={})",
                         static_cast<u32>(format.z_format), static_cast<u32>(format.stencil_format),
-                        vk::to_string(format.vk_format), vk::to_string(format.flags));
+                        vk::to_string(format.vk_format),
+                        vk::to_string(format.flags & ~GetFormatFeatureFlags(format.vk_format)));
         }
     }
 }
@@ -217,9 +218,10 @@ bool Instance::CreateDevice() {
     const vk::StructureChain properties_chain = physical_device.getProperties2<
         vk::PhysicalDeviceProperties2, vk::PhysicalDevicePortabilitySubsetPropertiesKHR,
         vk::PhysicalDeviceExternalMemoryHostPropertiesEXT, vk::PhysicalDeviceVulkan11Properties,
-        vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+        vk::PhysicalDevicePushDescriptorPropertiesKHR, vk::PhysicalDeviceVulkan12Properties>();
     subgroup_size = properties_chain.get<vk::PhysicalDeviceVulkan11Properties>().subgroupSize;
     push_descriptor_props = properties_chain.get<vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+    vk12_props = properties_chain.get<vk::PhysicalDeviceVulkan12Properties>();
     LOG_INFO(Render_Vulkan, "Physical device subgroup size {}", subgroup_size);
 
     features = feature_chain.get().features;
@@ -265,7 +267,9 @@ bool Instance::CreateDevice() {
 
     // These extensions are promoted by Vulkan 1.3, but for greater compatibility we use Vulkan 1.2
     // with extensions.
-    tooling_info = add_extension(VK_EXT_TOOLING_INFO_EXTENSION_NAME);
+    if (Config::vkValidationEnabled() || Config::isRdocEnabled()) {
+        tooling_info = add_extension(VK_EXT_TOOLING_INFO_EXTENSION_NAME);
+    }
     const bool maintenance4 = add_extension(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
     add_extension(VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME);
     add_extension(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
@@ -322,6 +326,7 @@ bool Instance::CreateDevice() {
                 .geometryShader = features.geometryShader,
                 .logicOp = features.logicOp,
                 .depthBiasClamp = features.depthBiasClamp,
+                .fillModeNonSolid = features.fillModeNonSolid,
                 .multiViewport = features.multiViewport,
                 .samplerAnisotropy = features.samplerAnisotropy,
                 .vertexPipelineStoresAndAtomics = features.vertexPipelineStoresAndAtomics,
@@ -340,6 +345,7 @@ bool Instance::CreateDevice() {
         },
         vk::PhysicalDeviceVulkan12Features{
             .samplerMirrorClampToEdge = vk12_features.samplerMirrorClampToEdge,
+            .drawIndirectCount = vk12_features.drawIndirectCount,
             .shaderFloat16 = vk12_features.shaderFloat16,
             .scalarBlockLayout = vk12_features.scalarBlockLayout,
             .uniformBufferStandardLayout = vk12_features.uniformBufferStandardLayout,
@@ -542,18 +548,21 @@ void Instance::CollectToolingInfo() {
     }
 }
 
-bool Instance::IsFormatSupported(const vk::Format format,
-                                 const vk::FormatFeatureFlags2 flags) const {
-    if (format == vk::Format::eUndefined) [[unlikely]] {
-        return true;
-    }
-
+vk::FormatFeatureFlags2 Instance::GetFormatFeatureFlags(vk::Format format) const {
     const auto it = format_properties.find(format);
     if (it == format_properties.end()) {
         UNIMPLEMENTED_MSG("Properties of format {} have not been queried.", vk::to_string(format));
     }
 
-    return ((it->second.optimalTilingFeatures | it->second.bufferFeatures) & flags) == flags;
+    return it->second.optimalTilingFeatures | it->second.bufferFeatures;
+}
+
+bool Instance::IsFormatSupported(const vk::Format format,
+                                 const vk::FormatFeatureFlags2 flags) const {
+    if (format == vk::Format::eUndefined) [[unlikely]] {
+        return true;
+    }
+    return (GetFormatFeatureFlags(format) & flags) == flags;
 }
 
 static vk::Format GetAlternativeFormat(const vk::Format format) {

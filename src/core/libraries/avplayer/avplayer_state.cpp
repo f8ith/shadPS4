@@ -1,21 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "avplayer_file_streamer.h"
-#include "avplayer_source.h"
-#include "avplayer_state.h"
-
-#include "common/singleton.h"
+#include "common/logging/log.h"
 #include "common/thread.h"
+#include "core/libraries/avplayer/avplayer_source.h"
+#include "core/libraries/avplayer/avplayer_state.h"
 #include "core/libraries/error_codes.h"
-#include "core/libraries/kernel/time_management.h"
-#include "core/linker.h"
+#include "core/tls.h"
 
 #include <magic_enum.hpp>
 
 namespace Libraries::AvPlayer {
-
-using namespace Kernel;
 
 void PS4_SYSV_ABI AvPlayerState::AutoPlayEventCallback(void* opaque, SceAvPlayerEvents event_id,
                                                        s32 source_id, void* event_data) {
@@ -87,12 +82,16 @@ void PS4_SYSV_ABI AvPlayerState::AutoPlayEventCallback(void* opaque, SceAvPlayer
         return;
     }
 
-    // Pass other events to the game
+    DefaultEventCallback(opaque, event_id, 0, event_data);
+}
+
+void AvPlayerState::DefaultEventCallback(void* opaque, SceAvPlayerEvents event_id, s32 source_id,
+                                         void* event_data) {
+    auto const self = reinterpret_cast<AvPlayerState*>(opaque);
     const auto callback = self->m_event_replacement.event_callback;
     const auto ptr = self->m_event_replacement.object_ptr;
     if (callback != nullptr) {
-        const auto* linker = Common::Singleton<Core::Linker>::Instance();
-        linker->ExecuteGuest(callback, ptr, event_id, 0, event_data);
+        Core::ExecuteGuest(callback, ptr, event_id, 0, event_data);
     }
 }
 
@@ -102,8 +101,10 @@ AvPlayerState::AvPlayerState(const SceAvPlayerInitData& init_data)
     if (m_event_replacement.event_callback == nullptr || init_data.auto_start) {
         m_auto_start = true;
         m_init_data.event_replacement.event_callback = &AvPlayerState::AutoPlayEventCallback;
-        m_init_data.event_replacement.object_ptr = this;
+    } else {
+        m_init_data.event_replacement.event_callback = &AvPlayerState::DefaultEventCallback;
     }
+    m_init_data.event_replacement.object_ptr = this;
     if (init_data.default_language != nullptr) {
         std::memcpy(m_default_language, init_data.default_language, sizeof(m_default_language));
     }
@@ -116,11 +117,12 @@ AvPlayerState::~AvPlayerState() {
         std::unique_lock lock(m_source_mutex);
         m_up_source.reset();
     }
-    if (m_controller_thread.joinable()) {
-        m_controller_thread.request_stop();
-        m_controller_thread.join();
-    }
+    m_controller_thread.Stop();
     m_event_queue.Clear();
+}
+
+void AvPlayerState::PostInit(const SceAvPlayerPostInitData& post_init_data) {
+    m_post_init_data = post_init_data;
 }
 
 // Called inside GAME thread
@@ -137,7 +139,9 @@ bool AvPlayerState::AddSource(std::string_view path, SceAvPlayerSourceType sourc
             return false;
         }
 
-        m_up_source = std::make_unique<AvPlayerSource>(*this);
+        m_up_source = std::make_unique<AvPlayerSource>(
+            *this, m_post_init_data.video_decoder_init.decoderType.video_type ==
+                       SCE_AVPLAYER_VIDEO_DECODER_TYPE_SOFTWARE2);
         if (!m_up_source->Init(m_init_data, path)) {
             SetState(AvState::Error);
             m_up_source.reset();
@@ -214,8 +218,7 @@ void AvPlayerState::WarningEvent(s32 id) {
 
 // Called inside GAME thread
 void AvPlayerState::StartControllerThread() {
-    m_controller_thread =
-        std::jthread([this](std::stop_token stop) { this->AvControllerThread(stop); });
+    m_controller_thread.Run([this](std::stop_token stop) { this->AvControllerThread(stop); });
 }
 
 // Called inside GAME thread
@@ -367,8 +370,7 @@ void AvPlayerState::EmitEvent(SceAvPlayerEvents event_id, void* event_data) {
     const auto callback = m_init_data.event_replacement.event_callback;
     if (callback) {
         const auto ptr = m_init_data.event_replacement.object_ptr;
-        const auto* linker = Common::Singleton<Core::Linker>::Instance();
-        linker->ExecuteGuest(callback, ptr, event_id, 0, event_data);
+        callback(ptr, event_id, 0, event_data);
     }
 }
 

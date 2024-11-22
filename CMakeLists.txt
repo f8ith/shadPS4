@@ -30,6 +30,8 @@ if(UNIX AND NOT APPLE)
 endif()
 
 option(ENABLE_QT_GUI "Enable the Qt GUI. If not selected then the emulator uses a minimal SDL-based UI instead" OFF)
+option(ENABLE_DISCORD_RPC "Enable the Discord RPC integration" ON)
+option(ENABLE_UPDATER "Enables the options to updater" ON)
 
 # First, determine whether to use CMAKE_OSX_ARCHITECTURES or CMAKE_SYSTEM_PROCESSOR.
 if (APPLE AND CMAKE_OSX_ARCHITECTURES)
@@ -47,9 +49,15 @@ else()
     message(FATAL_ERROR "Unsupported CPU architecture: ${BASE_ARCHITECTURE}")
 endif()
 
-if (APPLE AND ARCHITECTURE STREQUAL "x86_64")
+if (APPLE AND ARCHITECTURE STREQUAL "x86_64" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
     # Exclude ARM homebrew path to avoid conflicts when cross compiling.
     list(APPEND CMAKE_IGNORE_PREFIX_PATH "/opt/homebrew")
+
+    # Need to reconfigure pkg-config to use the right architecture library paths.
+    # It's not ideal to override these but otherwise the build breaks just by having pkg-config installed.
+    set(ENV{PKG_CONFIG_DIR} "")
+    set(ENV{PKG_CONFIG_LIBDIR} "${CMAKE_SYSROOT}/usr/lib/pkgconfig:${CMAKE_SYSROOT}/usr/share/pkgconfig:${CMAKE_SYSROOT}/usr/local/lib/pkgconfig:${CMAKE_SYSROOT}/usr/local/share/pkgconfig")
+    set(ENV{PKG_CONFIG_SYSROOT_DIR} ${CMAKE_SYSROOT})
 endif()
 
 # This function should be passed a list of all files in a target. It will automatically generate file groups
@@ -103,6 +111,7 @@ find_package(Boost 1.84.0 CONFIG)
 find_package(FFmpeg 5.1.2 MODULE)
 find_package(fmt 10.2.0 CONFIG)
 find_package(glslang 14.2.0 CONFIG)
+find_package(half 1.12.0 MODULE)
 find_package(magic_enum 0.9.6 CONFIG)
 find_package(RenderDoc 1.6.0 MODULE)
 find_package(SDL3 3.1.2 CONFIG)
@@ -171,12 +180,25 @@ set(AUDIO_CORE src/audio_core/sdl_audio.cpp
                src/audio_core/sdl_audio.h
 )
 
+set(AJM_LIB src/core/libraries/ajm/ajm.cpp
+            src/core/libraries/ajm/ajm.h
+            src/core/libraries/ajm/ajm_at9.cpp
+            src/core/libraries/ajm/ajm_at9.h
+            src/core/libraries/ajm/ajm_batch.cpp
+            src/core/libraries/ajm/ajm_batch.h
+            src/core/libraries/ajm/ajm_context.cpp
+            src/core/libraries/ajm/ajm_context.h
+            src/core/libraries/ajm/ajm_error.h
+            src/core/libraries/ajm/ajm_instance.cpp
+            src/core/libraries/ajm/ajm_instance.h
+            src/core/libraries/ajm/ajm_mp3.cpp
+            src/core/libraries/ajm/ajm_mp3.h
+)
+
 set(AUDIO_LIB src/core/libraries/audio/audioin.cpp
               src/core/libraries/audio/audioin.h
               src/core/libraries/audio/audioout.cpp
               src/core/libraries/audio/audioout.h
-              src/core/libraries/ajm/ajm.cpp
-              src/core/libraries/ajm/ajm.h
               src/core/libraries/ngs2/ngs2.cpp
               src/core/libraries/ngs2/ngs2.h
 )
@@ -186,31 +208,38 @@ set(GNM_LIB src/core/libraries/gnmdriver/gnmdriver.cpp
             src/core/libraries/gnmdriver/gnm_error.h
 )
 
-set(KERNEL_LIB
-               src/core/libraries/kernel/event_flag/event_flag.cpp
-               src/core/libraries/kernel/event_flag/event_flag.h
-               src/core/libraries/kernel/event_flag/event_flag_obj.cpp
-               src/core/libraries/kernel/event_flag/event_flag_obj.h
+set(KERNEL_LIB src/core/libraries/kernel/threads/condvar.cpp
+               src/core/libraries/kernel/threads/event_flag.cpp
+               src/core/libraries/kernel/threads/exception.cpp
+               src/core/libraries/kernel/threads/exception.h
+               src/core/libraries/kernel/threads/mutex.cpp
+               src/core/libraries/kernel/threads/pthread_attr.cpp
+               src/core/libraries/kernel/threads/pthread_clean.cpp
+               src/core/libraries/kernel/threads/pthread.cpp
+               src/core/libraries/kernel/threads/pthread_spec.cpp
                src/core/libraries/kernel/threads/rwlock.cpp
                src/core/libraries/kernel/threads/semaphore.cpp
-               src/core/libraries/kernel/threads/keys.cpp
-               src/core/libraries/kernel/threads/threads.h
-               src/core/libraries/kernel/cpu_management.cpp
-               src/core/libraries/kernel/cpu_management.h
-               src/core/libraries/kernel/event_queue.cpp
-               src/core/libraries/kernel/event_queue.h
-               src/core/libraries/kernel/event_queues.cpp
-               src/core/libraries/kernel/event_queues.h
+               src/core/libraries/kernel/threads/sleepq.cpp
+               src/core/libraries/kernel/threads/sleepq.h
+               src/core/libraries/kernel/threads/stack.cpp
+               src/core/libraries/kernel/threads/tcb.cpp
+               src/core/libraries/kernel/threads/pthread.h
+               src/core/libraries/kernel/threads/thread_state.cpp
+               src/core/libraries/kernel/threads/thread_state.h
+               src/core/libraries/kernel/process.cpp
+               src/core/libraries/kernel/process.h
+               src/core/libraries/kernel/equeue.cpp
+               src/core/libraries/kernel/equeue.h
                src/core/libraries/kernel/file_system.cpp
                src/core/libraries/kernel/file_system.h
-               src/core/libraries/kernel/libkernel.cpp
-               src/core/libraries/kernel/libkernel.h
-               src/core/libraries/kernel/memory_management.cpp
-               src/core/libraries/kernel/memory_management.h
-               src/core/libraries/kernel/thread_management.cpp
-               src/core/libraries/kernel/thread_management.h
-               src/core/libraries/kernel/time_management.cpp
-               src/core/libraries/kernel/time_management.h
+               src/core/libraries/kernel/kernel.cpp
+               src/core/libraries/kernel/kernel.h
+               src/core/libraries/kernel/memory.cpp
+               src/core/libraries/kernel/memory.h
+               src/core/libraries/kernel/threads.cpp
+               src/core/libraries/kernel/threads.h
+               src/core/libraries/kernel/time.cpp
+               src/core/libraries/kernel/time.h
 )
 
 set(NETWORK_LIBS src/core/libraries/network/http.cpp
@@ -282,6 +311,12 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/audio3d/audio3d_error.h
                 src/core/libraries/audio3d/audio3d_impl.cpp
                 src/core/libraries/audio3d/audio3d_impl.h
+                src/core/libraries/game_live_streaming/gamelivestreaming.cpp
+                src/core/libraries/game_live_streaming/gamelivestreaming.h
+                src/core/libraries/remote_play/remoteplay.cpp
+                src/core/libraries/remote_play/remoteplay.h
+                src/core/libraries/share_play/shareplay.cpp
+                src/core/libraries/share_play/shareplay.h
 )
 
 set(VIDEOOUT_LIB src/core/libraries/videoout/buffer.h
@@ -295,11 +330,17 @@ set(LIBC_SOURCES src/core/libraries/libc_internal/libc_internal.cpp
                  src/core/libraries/libc_internal/libc_internal.h
 )
 
-set(DIALOGS_LIB src/core/libraries/dialogs/error_dialog.cpp
-                src/core/libraries/dialogs/error_dialog.h
-                src/core/libraries/dialogs/ime_dialog.cpp
-                src/core/libraries/dialogs/ime_dialog.h
-                src/core/libraries/dialogs/error_codes.h
+set(IME_LIB src/core/libraries/ime/error_dialog.cpp
+            src/core/libraries/ime/error_dialog.h
+            src/core/libraries/ime/ime_common.h
+            src/core/libraries/ime/ime_dialog_ui.cpp
+            src/core/libraries/ime/ime_dialog_ui.h
+            src/core/libraries/ime/ime_dialog.cpp
+            src/core/libraries/ime/ime_dialog.h
+            src/core/libraries/ime/ime_ui.cpp
+            src/core/libraries/ime/ime_ui.h
+            src/core/libraries/ime/ime.cpp
+            src/core/libraries/ime/ime.h
 )
 
 set(PAD_LIB src/core/libraries/pad/pad.cpp
@@ -324,6 +365,21 @@ set(USBD_LIB src/core/libraries/usbd/usbd.cpp
              src/core/libraries/usbd/usbd.h
 )
 
+set(FIBER_LIB src/core/libraries/fiber/fiber.cpp
+              src/core/libraries/fiber/fiber.h
+)
+
+set(VDEC_LIB src/core/libraries/videodec/videodec2_impl.cpp
+             src/core/libraries/videodec/videodec2_impl.h
+             src/core/libraries/videodec/videodec2.cpp
+             src/core/libraries/videodec/videodec2.h
+             src/core/libraries/videodec/videodec2_avc.h
+             src/core/libraries/videodec/videodec.cpp
+             src/core/libraries/videodec/videodec.h
+             src/core/libraries/videodec/videodec_impl.cpp
+             src/core/libraries/videodec/videodec_impl.h
+)
+
 set(NP_LIBS src/core/libraries/np_manager/np_manager.cpp
             src/core/libraries/np_manager/np_manager.h
             src/core/libraries/np_score/np_score.cpp
@@ -340,15 +396,25 @@ set(MISC_LIBS  src/core/libraries/screenshot/screenshot.cpp
 
 set(DEV_TOOLS src/core/devtools/layer.cpp
               src/core/devtools/layer.h
+              src/core/devtools/options.cpp
+              src/core/devtools/options.h
               src/core/devtools/gcn/gcn_context_regs.cpp
               src/core/devtools/gcn/gcn_op_names.cpp
               src/core/devtools/gcn/gcn_shader_regs.cpp
               src/core/devtools/widget/cmd_list.cpp
               src/core/devtools/widget/cmd_list.h
+              src/core/devtools/widget/common.h
               src/core/devtools/widget/frame_dump.cpp
               src/core/devtools/widget/frame_dump.h
               src/core/devtools/widget/frame_graph.cpp
               src/core/devtools/widget/frame_graph.h
+              src/core/devtools/widget/imgui_memory_editor.h
+              src/core/devtools/widget/reg_popup.cpp
+              src/core/devtools/widget/reg_popup.h
+              src/core/devtools/widget/reg_view.cpp
+              src/core/devtools/widget/reg_view.h
+              src/core/devtools/widget/text_editor.cpp
+              src/core/devtools/widget/text_editor.h
 )
 
 set(COMMON src/common/logging/backend.cpp
@@ -395,7 +461,10 @@ set(COMMON src/common/logging/backend.cpp
            src/common/signal_context.h
            src/common/signal_context.cpp
            src/common/singleton.h
+           src/common/slab_heap.h
            src/common/slot_vector.h
+           src/common/spin_lock.cpp
+           src/common/spin_lock.h
            src/common/string_util.cpp
            src/common/string_util.h
            src/common/thread.cpp
@@ -406,11 +475,17 @@ set(COMMON src/common/logging/backend.cpp
            src/common/version.h
            src/common/ntapi.h
            src/common/ntapi.cpp
+           src/common/number_utils.h
+           src/common/number_utils.cpp
            src/common/memory_patcher.h
            src/common/memory_patcher.cpp
            src/common/scm_rev.cpp
            src/common/scm_rev.h
 )
+
+if (ENABLE_DISCORD_RPC)
+    list(APPEND COMMON src/common/discord_rpc_handler.cpp src/common/discord_rpc_handler.h)
+endif()
 
 set(CORE src/core/aerolib/stubs.cpp
          src/core/aerolib/stubs.h
@@ -447,6 +522,7 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/libraries/error_codes.h
          src/core/libraries/libs.h
          src/core/libraries/libs.cpp
+         ${AJM_LIB}
          ${AUDIO_LIB}
          ${GNM_LIB}
          ${KERNEL_LIB}
@@ -461,7 +537,9 @@ set(CORE src/core/aerolib/stubs.cpp
          ${RANDOM_LIB}
          ${USBD_LIB}
          ${MISC_LIBS}
-         ${DIALOGS_LIB}
+         ${IME_LIB}
+         ${FIBER_LIB}
+         ${VDEC_LIB}
          ${DEV_TOOLS}
          src/core/debug_state.cpp
          src/core/debug_state.h
@@ -474,6 +552,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/platform.h
          src/core/signals.cpp
          src/core/signals.h
+         src/core/thread.cpp
+         src/core/thread.h
          src/core/tls.cpp
          src/core/tls.h
          src/core/virtual_memory.cpp
@@ -518,6 +598,7 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/frontend/translate/data_share.cpp
                       src/shader_recompiler/frontend/translate/export.cpp
                       src/shader_recompiler/frontend/translate/scalar_alu.cpp
+                      src/shader_recompiler/frontend/translate/scalar_flow.cpp
                       src/shader_recompiler/frontend/translate/scalar_memory.cpp
                       src/shader_recompiler/frontend/translate/translate.cpp
                       src/shader_recompiler/frontend/translate/translate.h
@@ -526,6 +607,8 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/frontend/translate/vector_memory.cpp
                       src/shader_recompiler/frontend/control_flow_graph.cpp
                       src/shader_recompiler/frontend/control_flow_graph.h
+                      src/shader_recompiler/frontend/copy_shader.cpp
+                      src/shader_recompiler/frontend/copy_shader.h
                       src/shader_recompiler/frontend/decode.cpp
                       src/shader_recompiler/frontend/decode.h
                       src/shader_recompiler/frontend/fetch_shader.cpp
@@ -538,10 +621,12 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/frontend/structured_control_flow.h
                       src/shader_recompiler/ir/passes/constant_propagation_pass.cpp
                       src/shader_recompiler/ir/passes/dead_code_elimination_pass.cpp
+                      src/shader_recompiler/ir/passes/flatten_extended_userdata_pass.cpp
                       src/shader_recompiler/ir/passes/identity_removal_pass.cpp
                       src/shader_recompiler/ir/passes/ir_passes.h
                       src/shader_recompiler/ir/passes/lower_shared_mem_to_registers.cpp
                       src/shader_recompiler/ir/passes/resource_tracking_pass.cpp
+                      src/shader_recompiler/ir/passes/ring_access_elimination.cpp
                       src/shader_recompiler/ir/passes/shader_info_collection_pass.cpp
                       src/shader_recompiler/ir/passes/ssa_rewrite_pass.cpp
                       src/shader_recompiler/ir/abstract_syntax_list.h
@@ -574,6 +659,7 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
                src/video_core/amdgpu/pm4_cmds.h
                src/video_core/amdgpu/pm4_opcodes.h
                src/video_core/amdgpu/resource.h
+               src/video_core/amdgpu/types.h
                src/video_core/amdgpu/default_context.cpp
                src/video_core/buffer_cache/buffer.cpp
                src/video_core/buffer_cache/buffer.h
@@ -584,8 +670,6 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
                src/video_core/buffer_cache/word_manager.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
-               src/video_core/renderer_vulkan/renderer_vulkan.cpp
-               src/video_core/renderer_vulkan/renderer_vulkan.h
                src/video_core/renderer_vulkan/vk_common.cpp
                src/video_core/renderer_vulkan/vk_common.h
                src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
@@ -604,6 +688,8 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
                src/video_core/renderer_vulkan/vk_pipeline_common.h
                src/video_core/renderer_vulkan/vk_platform.cpp
                src/video_core/renderer_vulkan/vk_platform.h
+               src/video_core/renderer_vulkan/vk_presenter.cpp
+               src/video_core/renderer_vulkan/vk_presenter.h
                src/video_core/renderer_vulkan/vk_rasterizer.cpp
                src/video_core/renderer_vulkan/vk_rasterizer.h
                src/video_core/renderer_vulkan/vk_resource_pool.cpp
@@ -664,6 +750,12 @@ set(EMULATOR src/emulator.cpp
 if(ENABLE_QT_GUI)
 qt_add_resources(RESOURCE_FILES src/shadps4.qrc)
 
+if (ENABLE_UPDATER)
+    set(UPDATER src/qt_gui/check_update.cpp
+                src/qt_gui/check_update.h
+    )
+endif()
+
 set(QT_GUI src/qt_gui/about_dialog.cpp
            src/qt_gui/about_dialog.h
            src/qt_gui/about_dialog.ui
@@ -671,8 +763,6 @@ set(QT_GUI src/qt_gui/about_dialog.cpp
            src/qt_gui/background_music_player.h
            src/qt_gui/cheats_patches.cpp
            src/qt_gui/cheats_patches.h
-           src/qt_gui/check_update.cpp
-           src/qt_gui/check_update.h
            src/qt_gui/main_window_ui.h
            src/qt_gui/main_window.cpp
            src/qt_gui/main_window.h
@@ -686,6 +776,8 @@ set(QT_GUI src/qt_gui/about_dialog.cpp
            src/qt_gui/game_grid_frame.h
            src/qt_gui/game_install_dialog.cpp
            src/qt_gui/game_install_dialog.h
+           src/qt_gui/install_dir_select.cpp
+           src/qt_gui/install_dir_select.h
            src/qt_gui/pkg_viewer.cpp
            src/qt_gui/pkg_viewer.h
            src/qt_gui/trophy_viewer.cpp
@@ -701,6 +793,7 @@ set(QT_GUI src/qt_gui/about_dialog.cpp
            ${EMULATOR}
            ${RESOURCE_FILES}
            ${TRANSLATIONS}
+           ${UPDATER}
 )
 endif()
 
@@ -737,8 +830,8 @@ endif()
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui gcn)
-target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis glslang::SPIRV glslang::glslang SDL3::SDL3 pugixml::pugixml)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui gcn half::half)
+target_link_libraries(shadps4 PRIVATE Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis glslang::SPIRV glslang::glslang SDL3::SDL3 pugixml::pugixml)
 
 target_compile_definitions(shadps4 PRIVATE IMGUI_USER_CONFIG="imgui/imgui_config.h")
 target_compile_definitions(Dear_ImGui PRIVATE IMGUI_USER_CONFIG="${PROJECT_SOURCE_DIR}/src/imgui/imgui_config.h")
@@ -760,9 +853,6 @@ if (APPLE)
 
   # Replacement for std::chrono::time_zone
   target_link_libraries(shadps4 PRIVATE date::date-tz)
-
-  # Half float conversions for F16C patches
-  target_link_libraries(shadps4 PRIVATE half)
 endif()
 
 if (NOT ENABLE_QT_GUI)
@@ -776,8 +866,11 @@ else()
 endif()
 
 if (ENABLE_QT_GUI)
-   target_link_libraries(shadps4 PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Multimedia)
-   add_definitions(-DENABLE_QT_GUI)
+    target_link_libraries(shadps4 PRIVATE Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Multimedia)
+    add_definitions(-DENABLE_QT_GUI)
+    if (ENABLE_UPDATER)
+        add_definitions(-DENABLE_UPDATER)
+    endif()
 endif()
 
 if (WIN32)
@@ -841,7 +934,10 @@ if (ENABLE_QT_GUI)
     set_target_properties(shadps4 PROPERTIES
 #       WIN32_EXECUTABLE ON
         MACOSX_BUNDLE ON
-        MACOSX_BUNDLE_ICON_FILE shadPS4.icns)
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/dist/MacOSBundleInfo.plist.in"
+        MACOSX_BUNDLE_ICON_FILE "shadPS4.icns"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "0.4.1"
+        )
 
     set_source_files_properties(src/images/shadPS4.icns PROPERTIES
         MACOSX_PACKAGE_LOCATION Resources)
@@ -852,4 +948,20 @@ if (UNIX AND NOT APPLE)
         find_package(OpenSSL REQUIRED)
         target_link_libraries(shadps4 PRIVATE ${OPENSSL_LIBRARIES})
     endif()
+endif()
+
+# Discord RPC
+if (ENABLE_DISCORD_RPC)
+    target_link_libraries(shadps4 PRIVATE discord-rpc)
+endif()
+
+# Install rules
+install(TARGETS shadps4 BUNDLE DESTINATION .)
+
+if (ENABLE_QT_GUI AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(FILES "dist/net.shadps4.shadPS4.desktop" DESTINATION "share/applications")
+    install(FILES "dist/net.shadps4.shadPS4.releases.xml" DESTINATION "share/metainfo/releases")
+    install(FILES "dist/net.shadps4.shadPS4.metainfo.xml" DESTINATION "share/metainfo")
+    install(FILES ".github/shadps4.png" DESTINATION "share/icons/hicolor/512x512/apps" RENAME "net.shadps4.shadPS4.png")
+    install(FILES "src/images/net.shadps4.shadPS4.svg" DESTINATION "share/icons/hicolor/scalable/apps")
 endif()

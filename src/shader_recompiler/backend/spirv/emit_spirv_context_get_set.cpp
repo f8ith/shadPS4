@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/assert.h"
 #include "shader_recompiler/backend/spirv/emit_spirv_instructions.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 
@@ -46,6 +47,7 @@ Id OutputAttrPointer(EmitContext& ctx, IR::Attribute attr, u32 element) {
     if (IR::IsParam(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::Param0)};
         const auto& info{ctx.output_params.at(index)};
+        ASSERT(info.num_components > 0);
         if (info.num_components == 1) {
             return info.id;
         } else {
@@ -145,9 +147,14 @@ void EmitGetGotoVariable(EmitContext&) {
     UNREACHABLE_MSG("Unreachable instruction");
 }
 
-Id EmitReadConst(EmitContext& ctx) {
-    return ctx.u32_zero_value;
-    UNREACHABLE_MSG("Unreachable instruction");
+Id EmitReadConst(EmitContext& ctx, IR::Inst* inst) {
+    u32 flatbuf_off_dw = inst->Flags<u32>();
+    ASSERT(ctx.srt_flatbuf.binding >= 0);
+    ASSERT(flatbuf_off_dw > 0);
+    Id index = ctx.ConstU32(flatbuf_off_dw);
+    auto& buffer = ctx.srt_flatbuf;
+    const Id ptr{ctx.OpAccessChain(buffer.pointer_type, buffer.id, ctx.u32_zero_value, index)};
+    return ctx.OpLoad(ctx.U32[1], ptr);
 }
 
 Id EmitReadConstBuffer(EmitContext& ctx, u32 handle, Id index) {
@@ -164,7 +171,30 @@ Id EmitReadStepRate(EmitContext& ctx, int rate_idx) {
                                       rate_idx == 0 ? ctx.u32_zero_value : ctx.u32_one_value));
 }
 
-Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp) {
+Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, u32 comp, u32 index) {
+    if (ctx.info.stage == Stage::Geometry) {
+        if (IR::IsPosition(attr)) {
+            ASSERT(attr == IR::Attribute::Position0);
+            const auto position_arr_ptr = ctx.TypePointer(spv::StorageClass::Input, ctx.F32[4]);
+            const auto pointer{ctx.OpAccessChain(position_arr_ptr, ctx.gl_in, ctx.ConstU32(index),
+                                                 ctx.ConstU32(0u))};
+            const auto position_comp_ptr = ctx.TypePointer(spv::StorageClass::Input, ctx.F32[1]);
+            return ctx.OpLoad(ctx.F32[1],
+                              ctx.OpAccessChain(position_comp_ptr, pointer, ctx.ConstU32(comp)));
+        }
+
+        if (IR::IsParam(attr)) {
+            const u32 param_id{u32(attr) - u32(IR::Attribute::Param0)};
+            const auto param = ctx.input_params.at(param_id).id;
+            const auto param_arr_ptr = ctx.TypePointer(spv::StorageClass::Input, ctx.F32[4]);
+            const auto pointer{ctx.OpAccessChain(param_arr_ptr, param, ctx.ConstU32(index))};
+            const auto position_comp_ptr = ctx.TypePointer(spv::StorageClass::Input, ctx.F32[1]);
+            return ctx.OpLoad(ctx.F32[1],
+                              ctx.OpAccessChain(position_comp_ptr, pointer, ctx.ConstU32(comp)));
+        }
+        UNREACHABLE();
+    }
+
     if (IR::IsParam(attr)) {
         const u32 index{u32(attr) - u32(IR::Attribute::Param0)};
         const auto& param{ctx.input_params.at(index)};
@@ -232,6 +262,9 @@ Id EmitGetAttributeU32(EmitContext& ctx, IR::Attribute attr, u32 comp) {
     case IR::Attribute::IsFrontFace:
         return ctx.OpSelect(ctx.U32[1], ctx.OpLoad(ctx.U1[1], ctx.front_facing), ctx.u32_one_value,
                             ctx.u32_zero_value);
+    case IR::Attribute::PrimitiveId:
+        ASSERT(ctx.info.stage == Stage::Geometry);
+        return ctx.OpLoad(ctx.U32[1], ctx.primitive_id);
     default:
         throw NotImplementedException("Read U32 attribute {}", attr);
     }

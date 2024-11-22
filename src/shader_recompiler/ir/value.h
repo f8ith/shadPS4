@@ -29,6 +29,7 @@ class Value {
 public:
     Value() noexcept = default;
     explicit Value(IR::Inst* value) noexcept;
+    explicit Value(const IR::Inst* value) noexcept;
     explicit Value(IR::ScalarReg reg) noexcept;
     explicit Value(IR::VectorReg reg) noexcept;
     explicit Value(IR::Attribute value) noexcept;
@@ -39,6 +40,7 @@ public:
     explicit Value(f32 value) noexcept;
     explicit Value(u64 value) noexcept;
     explicit Value(f64 value) noexcept;
+    explicit Value(const char* value) noexcept;
 
     [[nodiscard]] bool IsIdentity() const noexcept;
     [[nodiscard]] bool IsPhi() const noexcept;
@@ -60,6 +62,7 @@ public:
     [[nodiscard]] f32 F32() const;
     [[nodiscard]] u64 U64() const;
     [[nodiscard]] f64 F64() const;
+    [[nodiscard]] const char* StringLiteral() const;
 
     [[nodiscard]] bool operator==(const Value& other) const;
     [[nodiscard]] bool operator!=(const Value& other) const;
@@ -78,7 +81,10 @@ private:
         f32 imm_f32;
         u64 imm_u64;
         f64 imm_f64;
+        const char* string_literal;
     };
+
+    friend class std::hash<Value>;
 };
 static_assert(static_cast<u32>(IR::Type::Void) == 0, "memset relies on IR::Type being zero");
 static_assert(std::is_trivially_copyable_v<Value>);
@@ -206,7 +212,7 @@ private:
     union {
         NonTriviallyDummy dummy{};
         boost::container::small_vector<std::pair<Block*, Value>, 2> phi_args;
-        std::array<Value, 5> args;
+        std::array<Value, 6> args;
     };
 };
 static_assert(sizeof(Inst) <= 128, "Inst size unintentionally increased");
@@ -348,8 +354,23 @@ inline f64 Value::F64() const {
     return imm_f64;
 }
 
+inline const char* Value::StringLiteral() const {
+    if (IsIdentity()) {
+        return inst->Arg(0).StringLiteral();
+    }
+    DEBUG_ASSERT(type == Type::StringLiteral);
+    return string_literal;
+}
+
 [[nodiscard]] inline bool IsPhi(const Inst& inst) {
     return inst.GetOpcode() == Opcode::Phi;
 }
 
 } // namespace Shader::IR
+
+namespace std {
+template <>
+struct hash<Shader::IR::Value> {
+    std::size_t operator()(const Shader::IR::Value& v) const;
+};
+} // namespace std

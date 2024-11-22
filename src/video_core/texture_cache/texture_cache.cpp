@@ -28,7 +28,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     info.num_bits = 32;
     info.UpdateSize();
     const ImageId null_id = slot_images.insert(instance, scheduler, info);
-    ASSERT(null_id.index == 0);
+    ASSERT(null_id.index == NULL_IMAGE_ID.index);
     const vk::Image& null_image = slot_images[null_id].image;
     Vulkan::SetObjectName(instance.GetDevice(), null_image, "Null Image");
     slot_images[null_id].flags = ImageFlagBits::Tracked;
@@ -36,7 +36,7 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     ImageViewInfo view_info;
     const auto null_view_id =
         slot_image_views.insert(instance, view_info, slot_images[null_id], null_id);
-    ASSERT(null_view_id.index == 0);
+    ASSERT(null_view_id.index == NULL_IMAGE_VIEW_ID.index);
     const vk::ImageView& null_image_view = slot_image_views[null_view_id].image_view.get();
     Vulkan::SetObjectName(instance.GetDevice(), null_image_view, "Null Image View");
 }
@@ -99,7 +99,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Image
         if (cache_info.resources == requested_info.resources) {
             return cache_image_id;
         } else {
-            UNREACHABLE();
+            // UNREACHABLE();
         }
     }
 
@@ -221,7 +221,8 @@ ImageId TextureCache::FindImage(const ImageInfo& info, FindFlags flags) {
             !IsVulkanFormatCompatible(info.pixel_format, cache_image.info.pixel_format)) {
             continue;
         }
-        ASSERT(cache_image.info.type == info.type || True(flags & FindFlags::RelaxFmt));
+        ASSERT((cache_image.info.type == info.type || info.size == Extent3D{1, 1, 1} ||
+                True(flags & FindFlags::RelaxFmt)));
         image_id = cache_id;
     }
 
@@ -237,6 +238,16 @@ ImageId TextureCache::FindImage(const ImageInfo& info, FindFlags flags) {
         }
     }
 
+    if (image_id) {
+        Image& image_resoved = slot_images[image_id];
+
+        if (image_resoved.info.resources < info.resources) {
+            // The image was clearly picked up wrong.
+            FreeImage(image_id);
+            image_id = {};
+            LOG_WARNING(Render_Vulkan, "Image overlap resolve failed");
+        }
+    }
     // Create and register a new image
     if (!image_id) {
         image_id = slot_images.insert(instance, scheduler, info);
@@ -365,6 +376,10 @@ void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_schedule
         return;
     }
 
+    if (image.info.num_samples > 1) {
+        return;
+    }
+
     const auto& num_layers = image.info.resources.layers;
     const auto& num_mips = image.info.resources.levels;
     ASSERT(num_mips == image.info.mips_layout.size());
@@ -417,7 +432,7 @@ void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_schedule
 
     const VAddr image_addr = image.info.guest_address;
     const size_t image_size = image.info.guest_size_bytes;
-    const auto [vk_buffer, buf_offset] = buffer_cache.ObtainTempBuffer(image_addr, image_size);
+    const auto [vk_buffer, buf_offset] = buffer_cache.ObtainViewBuffer(image_addr, image_size);
     // The obtained buffer may be written by a shader so we need to emit a barrier to prevent RAW
     // hazard
     if (auto barrier = vk_buffer->GetBarrier(vk::AccessFlagBits2::eTransferRead,
