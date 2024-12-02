@@ -4,10 +4,10 @@
 #pragma once
 
 #include <QNetworkAccessManager>
-#include <QScrollBar>
-#include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPainter>
+#include <QScrollBar>
 
 #include "background_music_player.h"
 #include "game_info.h"
@@ -33,8 +33,8 @@ public Q_SLOTS:
 private:
     void SetTableItem(int row, int column, QString itemStr);
     void SetRegionFlag(int row, int column, QString itemStr);
+    void SetCompatItem(int row, int column, QString titleId);
     QString GetPlayTime(const std::string& serial);
-    CompatibilityInfo GetCompatibility(const std::string& titleId);
     QList<QAction*> m_columnActs;
     GameInfoClass* game_inf_get = nullptr;
     bool ListSortedAsc = true;

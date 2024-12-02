@@ -5,6 +5,7 @@
 
 #include "common/path_util.h"
 #include "game_info.h"
+#include "qt_gui/game_list_utils.h"
 
 GameInfoClass::GameInfoClass() = default;
 GameInfoClass::~GameInfoClass() = default;
@@ -25,6 +26,8 @@ void GameInfoClass::GetGameInfo(QWidget* parent) {
     m_games = QtConcurrent::mapped(filePaths, [&](const QString& path) {
                   return readGameInfo(Common::FS::PathFromQString(path));
               }).results();
+
+    m_games.append(GameInfo{.name = "MediEvil", .serial = "CUSA11227"});
 
     // Progress bar, please be patient :)
     QProgressDialog dialog(tr("Loading game list, please wait :3"), tr("Cancel"), 0, 0, parent);

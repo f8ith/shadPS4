@@ -4,6 +4,10 @@
 #pragma once
 
 #include <unordered_map>
+#include <QDir>
+#include <QDirIterator>
+#include <QImage>
+#include <QString>
 #include "common/path_util.h"
 
 enum CompatibilityStatus {
@@ -65,15 +69,18 @@ struct GameInfo {
 class GameListUtils {
 public:
     inline static const std::unordered_map<QString, CompatibilityStatus> CompatLabelTable = {
-        {"status-nothing", CompatibilityStatus::Nothing},
-        {"status-boots", CompatibilityStatus::Boots},
-        {"status-menus", CompatibilityStatus::Menus},
-        {"status-ingame", CompatibilityStatus::Ingame},
-        {"status-playable", CompatibilityStatus::Playable}};
+        {QStringLiteral("status-nothing"), CompatibilityStatus::Nothing},
+        {QStringLiteral("status-boots"), CompatibilityStatus::Boots},
+        {QStringLiteral("status-menus"), CompatibilityStatus::Menus},
+        {QStringLiteral("status-ingame"), CompatibilityStatus::Ingame},
+        {QStringLiteral("status-playable"), CompatibilityStatus::Playable}};
     inline static const std::unordered_map<QString, OsInfo> OsLabelTable = {
-        {"os-linux", OsInfo::Linux}, {"os-macOS", OsInfo::macOS}, {"os-windows", OsInfo::Windows}};
-    static constexpr std::string CompatibilityInfoToString[6] = {"Unknown", "Nothing", "Boots",
-                                                                 "Menus",   "Ingame",  "Playable"};
+        {QStringLiteral("os-linux"), OsInfo::Linux},
+        {QStringLiteral("os-macOS"), OsInfo::macOS},
+        {QStringLiteral("os-windows"), OsInfo::Windows}};
+    inline static const QString CompatStatusTable[6] = {
+        QStringLiteral("Unknown"), QStringLiteral("Nothing"), QStringLiteral("Boots"),
+        QStringLiteral("Menus"),   QStringLiteral("Ingame"),  QStringLiteral("Playable")};
     static QString FormatSize(qint64 size) {
         static const QStringList suffixes = {"B", "KB", "MB", "GB", "TB"};
         int suffixIndex = 0;

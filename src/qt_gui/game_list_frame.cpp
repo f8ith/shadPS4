@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/logging/log.h"
 #include "common/path_util.h"
 #include "common/string_util.h"
 #include "game_list_frame.h"
@@ -105,11 +106,7 @@ void GameListFrame::PopulateGameList() {
         SetTableItem(i, 6, QString::fromStdString(m_game_info->m_games[i].size));
         SetTableItem(i, 7, QString::fromStdString(m_game_info->m_games[i].version));
 
-        CompatibilityInfo compatibility = this->GetCompatibility(m_game_info->m_games[i].serial);
-        m_game_info->m_games[i].compatibility = compatibility;
-        SetTableItem(i, 2,
-                     QString::fromStdString(
-                         m_game_list_utils.CompatibilityInfoToString[compatibility.status]));
+        SetCompatItem(i, 2, QString::fromStdString(m_game_info->m_games[i].serial));
 
         QString playTime = GetPlayTime(m_game_info->m_games[i].serial);
         if (playTime.isEmpty()) {
@@ -212,6 +209,147 @@ void GameListFrame::ResizeIcons(int iconSize) {
     this->horizontalHeader()->setSectionResizeMode(8, QHeaderView::ResizeToContents);
 }
 
+void GameListFrame::SetCompatItem(int row, int column, QString titleId) {
+    QUrl url;
+
+    url = QUrl("https://api.github.com/search/issues");
+
+    QUrlQuery query;
+    query.addQueryItem(
+        "q",
+        QString("%1 in:title state:open repo:shadps4-emu/shadps4-game-compatibility").arg(titleId));
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    QNetworkReply* reply = networkManager->get(request);
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, row, column]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            QMessageBox::warning(this, tr("Error"),
+                                 QString(tr("Network error:") + "\n" + reply->errorString()));
+            reply->deleteLater();
+            return;
+        }
+
+        QByteArray response = reply->readAll();
+        QJsonDocument jsonDoc(QJsonDocument::fromJson(response));
+
+        if (jsonDoc.isNull()) {
+            QMessageBox::warning(this, tr("Error"), tr("Failed to parse compatibility data."));
+            reply->deleteLater();
+            return;
+        }
+
+        QJsonObject jsonObj;
+        QJsonArray issueItems;
+        std::vector<CompatibilityInfo> compatDataArr;
+
+        jsonObj = jsonDoc.object();
+
+        if (!jsonObj.contains("items")) {
+            QMessageBox::warning(this, tr("Error"), tr("Invalid compatibility data."));
+            return;
+        }
+
+        QMessageBox::warning(this, tr("Error"), tr(response.constData()));
+
+        issueItems = jsonDoc["items"].toArray();
+
+        for (const auto& issueRef : std::as_const(issueItems)) {
+            QJsonObject issueObj = issueRef.toObject();
+            OsInfo currentOs = OsInfo::UnknownOS;
+            CompatibilityStatus compatibility = CompatibilityStatus::Unknown;
+            if (issueObj.contains("labels")) {
+
+                const QJsonArray& labelArray = issueObj["labels"].toArray();
+                for (const auto& elem : labelArray) {
+                    QString label = elem.toObject()["name"].toString();
+                    if (m_game_list_utils.OsLabelTable.find(label) !=
+                        m_game_list_utils.OsLabelTable.end()) {
+                        currentOs = m_game_list_utils.OsLabelTable.at(label);
+                        continue;
+                    }
+                    if (m_game_list_utils.CompatLabelTable.find(label) !=
+                        m_game_list_utils.CompatLabelTable.end()) {
+                        compatibility = m_game_list_utils.CompatLabelTable.at(label);
+                        continue;
+                    }
+                }
+
+                compatDataArr.push_back(CompatibilityInfo{currentOs, compatibility});
+
+            } else {
+                QMessageBox::warning(this, tr("Error"), tr("Invalid compatibility data."));
+                reply->deleteLater();
+                return;
+            }
+        }
+
+        reply->deleteLater();
+
+        CompatibilityInfo compatInfo =
+            compatDataArr.empty()
+                ? UNKNOWN_COMPATIBILITY
+                : std::reduce(
+                      compatDataArr.begin(), compatDataArr.end(), *compatDataArr.begin(),
+                      [](CompatibilityInfo a, CompatibilityInfo b) { return a.os < b.os ? a : b; });
+
+        QTableWidgetItem* item = new QTableWidgetItem();
+        QWidget* widget = new QWidget(this);
+        QVBoxLayout* layout = new QVBoxLayout(widget);
+
+        QColor color;
+
+        switch (compatInfo.status) {
+        case Unknown:
+            color = QStringLiteral("#000000");
+        case Nothing:
+            color = QStringLiteral("#212121");
+        case Boots:
+            color = QStringLiteral("#828282");
+        case Menus:
+            color = QStringLiteral("#FF0000");
+        case Ingame:
+            color = QStringLiteral("#F2D624");
+        case Playable:
+            color = QStringLiteral("#47D35C");
+        }
+
+        QPixmap circle_pixmap(16, 16);
+        circle_pixmap.fill(Qt::transparent);
+        QPainter painter(&circle_pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(color);
+        painter.setBrush(color);
+        painter.drawEllipse({circle_pixmap.width() / 2.0, circle_pixmap.height() / 2.0}, 7.0, 7.0);
+
+        QLabel* dotLabel = new QLabel("", widget);
+        dotLabel->setPixmap(circle_pixmap);
+
+        QLabel* label = new QLabel(m_game_list_utils.CompatStatusTable[compatInfo.status], widget);
+
+        label->setStyleSheet("color: white; font-size: 16px; font-weight: bold;");
+
+        // Create shadow effect
+        QGraphicsDropShadowEffect* shadowEffect = new QGraphicsDropShadowEffect();
+        shadowEffect->setBlurRadius(5);               // Set the blur radius of the shadow
+        shadowEffect->setColor(QColor(0, 0, 0, 160)); // Set the color and opacity of the shadow
+        shadowEffect->setOffset(2, 2);                // Set the offset of the shadow
+
+        label->setGraphicsEffect(shadowEffect); // Apply shadow effect to the QLabel
+
+        layout->addWidget(dotLabel);
+        layout->addWidget(label);
+        if (column != 8 && column != 1)
+            layout->setAlignment(Qt::AlignCenter);
+        widget->setLayout(layout);
+        this->setItem(row, column, item);
+        this->setCellWidget(row, column, widget);
+
+        return;
+    });
+}
+
 void GameListFrame::SetTableItem(int row, int column, QString itemStr) {
     QTableWidgetItem* item = new QTableWidgetItem();
     QWidget* widget = new QWidget(this);
@@ -291,86 +429,4 @@ QString GameListFrame::GetPlayTime(const std::string& serial) {
 
     file.close();
     return playTime;
-}
-
-CompatibilityInfo GameListFrame::GetCompatibility(const std::string& titleId) {
-    QUrl url;
-
-    url = QUrl("https://api.github.com/search/issues");
-
-    QUrlQuery query;
-    query.addQueryItem(
-        "q", QString::fromStdString(std::format(
-                 "{} in:title state:open repo:shadps4-emu/shadps4-game-compatibility", titleId)));
-    url.setQuery(query);
-
-    QNetworkRequest request(url);
-    QNetworkReply* reply = networkManager->get(request);
-
-    if (reply->error() != QNetworkReply::NoError) {
-        QMessageBox::warning(this, tr("Error"),
-                             QString(tr("Network error:") + "\n" + reply->errorString()));
-        reply->deleteLater();
-        return UNKNOWN_COMPATIBILITY;
-    }
-
-    QByteArray response = reply->readAll();
-    QJsonDocument jsonDoc(QJsonDocument::fromJson(response));
-
-    if (jsonDoc.isNull()) {
-        QMessageBox::warning(this, tr("Error"), tr("Failed to parse compatibility data."));
-        reply->deleteLater();
-        return UNKNOWN_COMPATIBILITY;
-    }
-
-    QJsonObject jsonObj;
-    QJsonArray issueItems;
-    std::vector<CompatibilityInfo> compatDataArr;
-
-    jsonObj = jsonDoc.object();
-
-    if (!jsonObj.contains("items")) {
-        QMessageBox::warning(this, tr("Error"), tr("Invalid compatibility data."));
-        return UNKNOWN_COMPATIBILITY;
-    }
-
-    issueItems = jsonDoc["items"].toArray();
-
-    for (const auto& issueRef : std::as_const(issueItems)) {
-        QJsonObject issueObj = issueRef.toObject();
-        OsInfo currentOs = OsInfo::UnknownOS;
-        CompatibilityStatus compatibility = CompatibilityStatus::Unknown;
-        if (issueObj.contains("labels")) {
-
-            const QJsonArray& labelArray = issueObj["labels"].toArray();
-            for (const auto& elem : labelArray) {
-                QString label = elem.toString();
-                if (m_game_list_utils.OsLabelTable.find(label) !=
-                    m_game_list_utils.OsLabelTable.end()) {
-                    currentOs = m_game_list_utils.OsLabelTable.at(label);
-                    continue;
-                }
-                if (m_game_list_utils.CompatLabelTable.find(label) !=
-                    m_game_list_utils.CompatLabelTable.end()) {
-                    compatibility = m_game_list_utils.CompatLabelTable.at(label);
-                    continue;
-                }
-            }
-
-            compatDataArr.push_back(CompatibilityInfo{currentOs, compatibility});
-
-        } else {
-            QMessageBox::warning(this, tr("Error"), tr("Invalid compatibility data."));
-            reply->deleteLater();
-            return UNKNOWN_COMPATIBILITY;
-        }
-    }
-
-    reply->deleteLater();
-
-    return compatDataArr.empty()
-               ? UNKNOWN_COMPATIBILITY
-               : std::reduce(
-                     compatDataArr.begin(), compatDataArr.end(), *compatDataArr.begin(),
-                     [](CompatibilityInfo a, CompatibilityInfo b) { return a.os < b.os ? a : b; });
 }
