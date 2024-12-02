@@ -3,7 +3,45 @@
 
 #pragma once
 
+#include <unordered_map>
 #include "common/path_util.h"
+
+enum CompatibilityStatus {
+    Unknown,
+    Nothing,
+    Boots,
+    Menus,
+    Ingame,
+    Playable,
+};
+
+// Prioritize different compatibility reports based on user's platform
+enum OsInfo {
+#ifdef Q_OS_WIN
+    Windows = 0,
+    UnknownOS,
+    Linux,
+    macOS,
+#elif defined(Q_OS_LINUX)
+    Linux = 0,
+    UnknownOS,
+    Windows,
+    macOS,
+#elif defined(Q_OS_MAC)
+    macOS = 0,
+    UnknownOS,
+    Linux,
+    Windows,
+#endif
+};
+
+struct CompatibilityInfo {
+    OsInfo os;
+    CompatibilityStatus status;
+};
+
+constexpr CompatibilityInfo UNKNOWN_COMPATIBILITY =
+    CompatibilityInfo{OsInfo::UnknownOS, CompatibilityStatus::Unknown};
 
 struct GameInfo {
     std::filesystem::path path;      // root path of game directory
@@ -15,6 +53,7 @@ struct GameInfo {
     std::string size;
     // variables extracted from param.sfo
     std::string name = "Unknown";
+    CompatibilityInfo compatibility = UNKNOWN_COMPATIBILITY;
     std::string serial = "Unknown";
     std::string version = "Unknown";
     std::string region = "Unknown";
@@ -25,6 +64,16 @@ struct GameInfo {
 
 class GameListUtils {
 public:
+    inline static const std::unordered_map<QString, CompatibilityStatus> CompatLabelTable = {
+        {"status-nothing", CompatibilityStatus::Nothing},
+        {"status-boots", CompatibilityStatus::Boots},
+        {"status-menus", CompatibilityStatus::Menus},
+        {"status-ingame", CompatibilityStatus::Ingame},
+        {"status-playable", CompatibilityStatus::Playable}};
+    inline static const std::unordered_map<QString, OsInfo> OsLabelTable = {
+        {"os-linux", OsInfo::Linux}, {"os-macOS", OsInfo::macOS}, {"os-windows", OsInfo::Windows}};
+    static constexpr std::string CompatibilityInfoToString[6] = {"Unknown", "Nothing", "Boots",
+                                                                 "Menus",   "Ingame",  "Playable"};
     static QString FormatSize(qint64 size) {
         static const QStringList suffixes = {"B", "KB", "MB", "GB", "TB"};
         int suffixIndex = 0;

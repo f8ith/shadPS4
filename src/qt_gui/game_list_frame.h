@@ -3,7 +3,11 @@
 
 #pragma once
 
+#include <QNetworkAccessManager>
 #include <QScrollBar>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 
 #include "background_music_player.h"
 #include "game_info.h"
@@ -30,9 +34,12 @@ private:
     void SetTableItem(int row, int column, QString itemStr);
     void SetRegionFlag(int row, int column, QString itemStr);
     QString GetPlayTime(const std::string& serial);
+    CompatibilityInfo GetCompatibility(const std::string& titleId);
     QList<QAction*> m_columnActs;
     GameInfoClass* game_inf_get = nullptr;
     bool ListSortedAsc = true;
+
+    QNetworkAccessManager* networkManager;
 
 public:
     void PopulateGameList();
@@ -59,18 +66,20 @@ public:
         case 1:
             return a.name < b.name;
         case 2:
-            return a.serial.substr(4) < b.serial.substr(4);
+            return a.compatibility.status < b.compatibility.status;
         case 3:
-            return a.region < b.region;
+            return a.serial.substr(4) < b.serial.substr(4);
         case 4:
-            return parseAsFloat(a.fw, 0) < parseAsFloat(b.fw, 0);
+            return a.region < b.region;
         case 5:
-            return parseSizeMB(b.size) < parseSizeMB(a.size);
+            return parseAsFloat(a.fw, 0) < parseAsFloat(b.fw, 0);
         case 6:
-            return a.version < b.version;
+            return parseSizeMB(b.size) < parseSizeMB(a.size);
         case 7:
-            return a.play_time < b.play_time;
+            return a.version < b.version;
         case 8:
+            return a.play_time < b.play_time;
+        case 9:
             return a.path < b.path;
         default:
             return false;
@@ -82,18 +91,20 @@ public:
         case 1:
             return a.name > b.name;
         case 2:
-            return a.serial.substr(4) > b.serial.substr(4);
+            return a.compatibility.status > b.compatibility.status;
         case 3:
-            return a.region > b.region;
+            return a.serial.substr(4) > b.serial.substr(4);
         case 4:
-            return parseAsFloat(a.fw, 0) > parseAsFloat(b.fw, 0);
+            return a.region > b.region;
         case 5:
-            return parseSizeMB(b.size) > parseSizeMB(a.size);
+            return parseAsFloat(a.fw, 0) > parseAsFloat(b.fw, 0);
         case 6:
-            return a.version > b.version;
+            return parseSizeMB(b.size) > parseSizeMB(a.size);
         case 7:
-            return a.play_time > b.play_time;
+            return a.version > b.version;
         case 8:
+            return a.play_time > b.play_time;
+        case 9:
             return a.path > b.path;
         default:
             return false;

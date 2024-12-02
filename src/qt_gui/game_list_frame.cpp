@@ -4,9 +4,11 @@
 #include "common/path_util.h"
 #include "common/string_util.h"
 #include "game_list_frame.h"
+#include "game_list_utils.h"
 
 GameListFrame::GameListFrame(std::shared_ptr<GameInfoClass> game_info_get, QWidget* parent)
-    : QTableWidget(parent), m_game_info(game_info_get) {
+    : QTableWidget(parent), m_game_info(game_info_get),
+      networkManager(new QNetworkAccessManager(this)) {
     icon_size = Config::getIconSize();
     this->setShowGrid(false);
     this->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -24,17 +26,18 @@ GameListFrame::GameListFrame(std::shared_ptr<GameInfoClass> game_info_get, QWidg
     this->horizontalHeader()->setSortIndicatorShown(true);
     this->horizontalHeader()->setStretchLastSection(true);
     this->setContextMenuPolicy(Qt::CustomContextMenu);
-    this->setColumnCount(9);
+    this->setColumnCount(10);
     this->setColumnWidth(1, 300); // Name
-    this->setColumnWidth(2, 120); // Serial
-    this->setColumnWidth(3, 90);  // Region
-    this->setColumnWidth(4, 90);  // Firmware
-    this->setColumnWidth(5, 90);  // Size
-    this->setColumnWidth(6, 90);  // Version
-    this->setColumnWidth(7, 100); // Play Time
+    this->setColumnWidth(2, 200); // Name
+    this->setColumnWidth(3, 120); // Serial
+    this->setColumnWidth(4, 90);  // Region
+    this->setColumnWidth(5, 90);  // Firmware
+    this->setColumnWidth(6, 90);  // Size
+    this->setColumnWidth(7, 90);  // Version
+    this->setColumnWidth(8, 100); // Play Time
     QStringList headers;
-    headers << tr("Icon") << tr("Name") << tr("Serial") << tr("Region") << tr("Firmware")
-            << tr("Size") << tr("Version") << tr("Play Time") << tr("Path");
+    headers << tr("Icon") << tr("Name") << tr("Compatibility") << tr("Serial") << tr("Region")
+            << tr("Firmware") << tr("Size") << tr("Version") << tr("Play Time") << tr("Path");
     this->setHorizontalHeaderLabels(headers);
     this->horizontalHeader()->setSortIndicatorShown(true);
     this->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -96,16 +99,22 @@ void GameListFrame::PopulateGameList() {
 
     for (int i = 0; i < m_game_info->m_games.size(); i++) {
         SetTableItem(i, 1, QString::fromStdString(m_game_info->m_games[i].name));
-        SetTableItem(i, 2, QString::fromStdString(m_game_info->m_games[i].serial));
-        SetRegionFlag(i, 3, QString::fromStdString(m_game_info->m_games[i].region));
-        SetTableItem(i, 4, QString::fromStdString(m_game_info->m_games[i].fw));
-        SetTableItem(i, 5, QString::fromStdString(m_game_info->m_games[i].size));
-        SetTableItem(i, 6, QString::fromStdString(m_game_info->m_games[i].version));
+        SetTableItem(i, 3, QString::fromStdString(m_game_info->m_games[i].serial));
+        SetRegionFlag(i, 4, QString::fromStdString(m_game_info->m_games[i].region));
+        SetTableItem(i, 5, QString::fromStdString(m_game_info->m_games[i].fw));
+        SetTableItem(i, 6, QString::fromStdString(m_game_info->m_games[i].size));
+        SetTableItem(i, 7, QString::fromStdString(m_game_info->m_games[i].version));
+
+        CompatibilityInfo compatibility = this->GetCompatibility(m_game_info->m_games[i].serial);
+        m_game_info->m_games[i].compatibility = compatibility;
+        SetTableItem(i, 2,
+                     QString::fromStdString(
+                         m_game_list_utils.CompatibilityInfoToString[compatibility.status]));
 
         QString playTime = GetPlayTime(m_game_info->m_games[i].serial);
         if (playTime.isEmpty()) {
             m_game_info->m_games[i].play_time = "0:00:00";
-            SetTableItem(i, 7, "0");
+            SetTableItem(i, 8, "0");
         } else {
             QStringList timeParts = playTime.split(':');
             int hours = timeParts[0].toInt();
@@ -123,15 +132,15 @@ void GameListFrame::PopulateGameList() {
             formattedPlayTime = formattedPlayTime.trimmed();
             m_game_info->m_games[i].play_time = playTime.toStdString();
             if (formattedPlayTime.isEmpty()) {
-                SetTableItem(i, 7, "0");
+                SetTableItem(i, 8, "0");
             } else {
-                SetTableItem(i, 7, formattedPlayTime);
+                SetTableItem(i, 8, formattedPlayTime);
             }
         }
 
         QString path;
         Common::FS::PathToQString(path, m_game_info->m_games[i].path);
-        SetTableItem(i, 8, path);
+        SetTableItem(i, 9, path);
     }
 }
 
@@ -282,4 +291,86 @@ QString GameListFrame::GetPlayTime(const std::string& serial) {
 
     file.close();
     return playTime;
+}
+
+CompatibilityInfo GameListFrame::GetCompatibility(const std::string& titleId) {
+    QUrl url;
+
+    url = QUrl("https://api.github.com/search/issues");
+
+    QUrlQuery query;
+    query.addQueryItem(
+        "q", QString::fromStdString(std::format(
+                 "{} in:title state:open repo:shadps4-emu/shadps4-game-compatibility", titleId)));
+    url.setQuery(query);
+
+    QNetworkRequest request(url);
+    QNetworkReply* reply = networkManager->get(request);
+
+    if (reply->error() != QNetworkReply::NoError) {
+        QMessageBox::warning(this, tr("Error"),
+                             QString(tr("Network error:") + "\n" + reply->errorString()));
+        reply->deleteLater();
+        return UNKNOWN_COMPATIBILITY;
+    }
+
+    QByteArray response = reply->readAll();
+    QJsonDocument jsonDoc(QJsonDocument::fromJson(response));
+
+    if (jsonDoc.isNull()) {
+        QMessageBox::warning(this, tr("Error"), tr("Failed to parse compatibility data."));
+        reply->deleteLater();
+        return UNKNOWN_COMPATIBILITY;
+    }
+
+    QJsonObject jsonObj;
+    QJsonArray issueItems;
+    std::vector<CompatibilityInfo> compatDataArr;
+
+    jsonObj = jsonDoc.object();
+
+    if (!jsonObj.contains("items")) {
+        QMessageBox::warning(this, tr("Error"), tr("Invalid compatibility data."));
+        return UNKNOWN_COMPATIBILITY;
+    }
+
+    issueItems = jsonDoc["items"].toArray();
+
+    for (const auto& issueRef : std::as_const(issueItems)) {
+        QJsonObject issueObj = issueRef.toObject();
+        OsInfo currentOs = OsInfo::UnknownOS;
+        CompatibilityStatus compatibility = CompatibilityStatus::Unknown;
+        if (issueObj.contains("labels")) {
+
+            const QJsonArray& labelArray = issueObj["labels"].toArray();
+            for (const auto& elem : labelArray) {
+                QString label = elem.toString();
+                if (m_game_list_utils.OsLabelTable.find(label) !=
+                    m_game_list_utils.OsLabelTable.end()) {
+                    currentOs = m_game_list_utils.OsLabelTable.at(label);
+                    continue;
+                }
+                if (m_game_list_utils.CompatLabelTable.find(label) !=
+                    m_game_list_utils.CompatLabelTable.end()) {
+                    compatibility = m_game_list_utils.CompatLabelTable.at(label);
+                    continue;
+                }
+            }
+
+            compatDataArr.push_back(CompatibilityInfo{currentOs, compatibility});
+
+        } else {
+            QMessageBox::warning(this, tr("Error"), tr("Invalid compatibility data."));
+            reply->deleteLater();
+            return UNKNOWN_COMPATIBILITY;
+        }
+    }
+
+    reply->deleteLater();
+
+    return compatDataArr.empty()
+               ? UNKNOWN_COMPATIBILITY
+               : std::reduce(
+                     compatDataArr.begin(), compatDataArr.end(), *compatDataArr.begin(),
+                     [](CompatibilityInfo a, CompatibilityInfo b) { return a.os < b.os ? a : b; });
 }
